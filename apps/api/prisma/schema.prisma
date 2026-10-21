@@ -1,0 +1,1463 @@
+// Data model (SPEC §11). Triggers, check constraints, extensions, sequences and the occupancy
+// exclusion constraint live in hand-written SQL migrations (see migrations/*_constraints).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------------------------------------------
+enum Role {
+  OWNER
+  CUSTOMER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ServiceMode {
+  CARE
+  LIST
+  LIST_AND_CARE
+}
+
+enum PropertyStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum VerificationSubject {
+  OWNER
+  PROPERTY
+}
+
+enum VerificationStatus {
+  NOT_SUBMITTED
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum DocumentOwnerType {
+  VERIFICATION
+  PROVIDER
+}
+
+enum ListingStatus {
+  DRAFT
+  SUBMITTED
+  CHANGES_REQUESTED
+  PUBLISHED
+  PAUSED
+  REJECTED
+  ARCHIVED
+}
+
+enum BookingMode {
+  INSTANT
+  OWNER_APPROVAL
+}
+
+enum OccupancyKind {
+  BOOKING_HOLD
+  BOOKING_CONFIRMED
+  BLOCK_OWNER
+  BLOCK_MAINTENANCE
+  BLOCK_ADMIN
+}
+
+enum BookingStatus {
+  REQUESTED
+  AWAITING_PAYMENT
+  CONFIRMED
+  DECLINED
+  EXPIRED
+  CANCELLED
+  COMPLETED
+}
+
+enum PayoutStatus {
+  PENDING
+  ELIGIBLE
+  ON_HOLD
+  PAID
+  VOID
+}
+
+enum ReviewStatus {
+  PUBLISHED
+  HIDDEN
+}
+
+enum Urgency {
+  STANDARD
+  URGENT
+  SAFETY_RISK
+}
+
+enum RequestStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  NEEDS_INFORMATION
+  INSPECTION_SCHEDULED
+  QUOTATION_DRAFT
+  QUOTATION_SENT
+  APPROVED
+  WORK_ORDER_CREATED
+  REJECTED
+  CANCELLED
+  NOT_SERVICEABLE
+}
+
+enum RequestSource {
+  OWNER
+  ADMIN
+  TURNOVER_AUTO
+}
+
+enum InspectionStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_ACCESS
+}
+
+enum QuoteType {
+  ORIGINAL
+  CHANGE_ORDER
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+  SUPERSEDED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum LineType {
+  LABOUR
+  MATERIAL
+  TRAVEL
+  INSPECTION_FEE
+  OTHER
+  DISCOUNT
+}
+
+enum LineDirection {
+  ADD
+  DEDUCT
+}
+
+enum ProviderType {
+  INDIVIDUAL
+  GROUP
+}
+
+enum ProviderStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ProviderVerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum WorkOrderKind {
+  STANDARD
+  REWORK
+}
+
+enum WorkOrderStatus {
+  DRAFT
+  SCHEDULED
+  ASSIGNED
+  IN_PROGRESS
+  BLOCKED
+  SUBMITTED_FOR_REVIEW
+  REWORK_REQUIRED
+  READY_FOR_OWNER_REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum BlockedReason {
+  ACCESS_DENIED
+  HIDDEN_DAMAGE
+  MATERIAL_UNAVAILABLE
+  SAFETY_CONCERN
+  SCOPE_CHANGE
+  OTHER
+}
+
+enum AssignmentRole {
+  PRIMARY
+  SUPPORT
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum PaymentPurpose {
+  INSPECTION_FEE
+  DEPOSIT
+  MILESTONE
+  FINAL
+}
+
+enum DueTrigger {
+  ON_INSPECTION_SCHEDULED
+  ON_QUOTE_APPROVAL
+  ON_WORK_SCHEDULED
+  ON_COMPLETION_ACCEPTED
+  MANUAL
+}
+
+enum RequirementStatus {
+  PENDING
+  PAID
+  WAIVED
+  CANCELLED
+}
+
+enum ThreadType {
+  REQUEST
+  ISSUE
+  WORK_ORDER
+  BOOKING
+  LISTING_REVIEW
+}
+
+enum MessageVisibility {
+  PARTICIPANT
+  INTERNAL
+}
+
+enum AttachmentOwnerType {
+  PROPERTY
+  LISTING
+  REQUEST
+  MESSAGE
+  INSPECTION
+  WORK_ORDER
+  ISSUE
+  VERIFICATION
+  PROVIDER
+}
+
+enum EvidencePhase {
+  GENERAL
+  BEFORE
+  DURING
+  AFTER
+}
+
+enum AttachmentStatus {
+  PENDING
+  AVAILABLE
+  REJECTED
+  DELETED
+}
+
+enum AttachmentSource {
+  USER_UPLOAD
+  ADMIN_UPLOAD_FOR_PROVIDER
+}
+
+enum AttachmentVisibility {
+  PUBLIC
+  PARTICIPANT
+  INTERNAL
+}
+
+enum IssueSubjectType {
+  WORK_ORDER
+  BOOKING
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ResolutionCode {
+  REWORK_DONE
+  PARTIAL_REFUND
+  FULL_REFUND
+  PAYOUT_ADJUSTED
+  NO_ACTION_REQUIRED
+  DUPLICATE
+  RAISER_WITHDREW
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum InvoiceKind {
+  MAINTENANCE_RECEIPT
+  MAINTENANCE_FINAL
+  BOOKING_RECEIPT
+  COMMISSION_STATEMENT
+}
+
+enum NotificationChannel {
+  IN_APP
+  SMS
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum AiSuggestionStatus {
+  PENDING
+  READY
+  ACCEPTED
+  EDITED
+  DISMISSED
+  FAILED
+}
+
+// ------------------------------------------------------------------------------------------------
+// Identity
+// ------------------------------------------------------------------------------------------------
+model User {
+  id                 String     @id @default(uuid(7)) @db.Uuid
+  phoneE164          String     @unique @map("phone_e164")
+  phoneVerifiedAt    DateTime?  @map("phone_verified_at") @db.Timestamptz(3)
+  email              String?
+  fullName           String?    @map("full_name")
+  status             UserStatus @default(ACTIVE)
+  permissionFlags    String[]   @default([]) @map("permission_flags")
+  communicationPrefs Json       @default("{}") @map("communication_prefs")
+  lastActiveRole     Role?      @map("last_active_role")
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roles         UserRole[]
+  sessions      Session[]
+  ownerProfile  OwnerProfile?
+  properties    Property[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model UserRole {
+  userId    String   @map("user_id") @db.Uuid
+  role      Role
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@id([userId, role])
+  @@map("user_roles")
+}
+
+model OwnerProfile {
+  userId                   String             @id @map("user_id") @db.Uuid
+  defaultServiceMode       ServiceMode?       @map("default_service_mode")
+  payoutAccountRef         String?            @map("payout_account_ref")
+  commissionOverrideBps    Int?               @map("commission_override_bps")
+  commissionOverrideReason String?            @map("commission_override_reason")
+  verificationStatus       VerificationStatus @default(NOT_SUBMITTED) @map("verification_status")
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user                     User               @relation(fields: [userId], references: [id])
+
+  @@map("owner_profiles")
+}
+
+model OtpChallenge {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  phoneE164  String    @map("phone_e164")
+  verifier   String
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  attempts   Int       @default(0)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  ipHash     String?   @map("ip_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([phoneE164, createdAt])
+  @@map("otp_challenges")
+}
+
+model Session {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  activeRole Role?     @map("active_role")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  ipHash     String?   @map("ip_hash")
+  userAgent  String?   @map("user_agent")
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model IdempotencyKey {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  key            String
+  userId         String   @map("user_id") @db.Uuid
+  endpoint       String
+  requestHash    String   @map("request_hash")
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([userId, endpoint, key])
+  @@map("idempotency_keys")
+}
+
+model ConsentRecord {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  documentType String   @map("document_type")
+  version      String
+  acceptedAt   DateTime @default(now()) @map("accepted_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("consent_records")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Configuration
+// ------------------------------------------------------------------------------------------------
+model ServiceArea {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String
+  state       String
+  district    String
+  pinCodes    String[] @map("pin_codes")
+  isActive    Boolean  @default(true) @map("is_active")
+  offersStays Boolean  @default(false) @map("offers_stays")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  categories CategoryServiceArea[]
+  providers  ProviderServiceArea[]
+
+  @@map("service_areas")
+}
+
+model ServiceCategory {
+  id                        String   @id @default(uuid(7)) @db.Uuid
+  slug                      String   @unique
+  name                      String
+  description               String?
+  isActive                  Boolean  @default(true) @map("is_active")
+  displayOrder              Int      @default(100) @map("display_order")
+  inspectionUsuallyRequired Boolean  @default(false) @map("inspection_usually_required")
+  intakeSchema              Json     @map("intake_schema")
+  dangerRules               Json     @default("[]") @map("danger_rules")
+  safetyNotes               String?  @map("safety_notes")
+  attachmentRules           Json     @default("{}") @map("attachment_rules")
+  requiredEvidence          Json     @default("{}") @map("required_evidence")
+  paymentPolicy             Json     @default("{}") @map("payment_policy")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  serviceAreas       CategoryServiceArea[]
+  checklistTemplates ChecklistTemplate[]
+  providers          ProviderSkill[]
+
+  @@map("service_categories")
+}
+
+model CategoryServiceArea {
+  categoryId    String          @map("category_id") @db.Uuid
+  serviceAreaId String          @map("service_area_id") @db.Uuid
+  category      ServiceCategory @relation(fields: [categoryId], references: [id])
+  serviceArea   ServiceArea     @relation(fields: [serviceAreaId], references: [id])
+
+  @@id([categoryId, serviceAreaId])
+  @@map("category_service_areas")
+}
+
+model ChecklistTemplate {
+  id         String          @id @default(uuid(7)) @db.Uuid
+  categoryId String          @map("category_id") @db.Uuid
+  version    Int
+  items      Json
+  isActive   Boolean         @default(true) @map("is_active")
+  createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  category   ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([categoryId, version])
+  @@map("checklist_templates")
+}
+
+model Amenity {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  slug      String           @unique
+  name      String
+  group     String
+  iconKey   String?          @map("icon_key")
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  listings  ListingAmenity[]
+
+  @@map("amenities")
+}
+
+model CancellationPolicy {
+  key         String   @id
+  name        String
+  description String?
+  rules       Json
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("cancellation_policies")
+}
+
+model PolicySetting {
+  key         String   @id
+  valueJson   Json     @map("value_json")
+  description String?
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("policy_settings")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Properties and verification
+// ------------------------------------------------------------------------------------------------
+model Property {
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  ownerUserId        String             @map("owner_user_id") @db.Uuid
+  nickname           String
+  propertyType       String             @map("property_type")
+  addressLine1       String             @map("address_line1")
+  addressLine2       String?            @map("address_line2")
+  locality           String
+  city               String
+  district           String
+  state              String
+  pinCode            String             @map("pin_code")
+  latitude           Float?
+  longitude          Float?
+  areaSqft           Int?               @map("area_sqft")
+  /// Encrypted at application level (AES-256-GCM); never returned by default.
+  accessNotes        String?            @map("access_notes")
+  serviceMode        ServiceMode        @map("service_mode")
+  status             PropertyStatus     @default(ACTIVE)
+  verificationStatus VerificationStatus @default(NOT_SUBMITTED) @map("verification_status")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  owner    User              @relation(fields: [ownerUserId], references: [id])
+  contacts PropertyContact[]
+  listing  Listing?
+  requests ServiceRequest[]
+
+  @@index([ownerUserId])
+  @@map("properties")
+}
+
+model PropertyContact {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  propertyId       String    @map("property_id") @db.Uuid
+  name             String
+  phone            String
+  relationship     String
+  accessRole       String?   @map("access_role")
+  consentConfirmed Boolean   @map("consent_confirmed")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+  property         Property  @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+  @@map("property_contacts")
+}
+
+model Verification {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  subjectType VerificationSubject @map("subject_type")
+  subjectId   String              @map("subject_id") @db.Uuid
+  status      VerificationStatus
+  submittedAt DateTime?           @map("submitted_at") @db.Timestamptz(3)
+  reviewedBy  String?             @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime?           @map("reviewed_at") @db.Timestamptz(3)
+  reason      String?
+  expiresAt   DateTime?           @map("expires_at") @db.Timestamptz(3)
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([subjectType, subjectId])
+  @@index([status])
+  @@map("verifications")
+}
+
+model VerificationDocument {
+  id           String            @id @default(uuid(7)) @db.Uuid
+  ownerType    DocumentOwnerType @map("owner_type")
+  ownerId      String            @map("owner_id") @db.Uuid
+  docType      String            @map("doc_type")
+  attachmentId String            @map("attachment_id") @db.Uuid
+  objectKey    String            @map("object_key")
+  status       String            @default("ACTIVE")
+  expiresAt    DateTime?         @map("expires_at") @db.Timestamptz(3)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ownerType, ownerId])
+  @@map("verification_documents")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Listings, occupancy, bookings
+// ------------------------------------------------------------------------------------------------
+model Listing {
+  id                      String        @id @default(uuid(7)) @db.Uuid
+  reference               String        @unique
+  propertyId              String        @unique @map("property_id") @db.Uuid
+  ownerUserId             String        @map("owner_user_id") @db.Uuid
+  status                  ListingStatus @default(DRAFT)
+  title                   String        @default("")
+  description             String        @default("")
+  maxGuests               Int           @default(2) @map("max_guests")
+  bedrooms                Int           @default(1)
+  beds                    Int           @default(1)
+  bathrooms               Int           @default(1)
+  houseRules              Json          @default("{}") @map("house_rules")
+  checkInTime             String        @default("14:00") @map("check_in_time")
+  checkOutTime            String        @default("11:00") @map("check_out_time")
+  basePricePaise          BigInt        @default(0) @map("base_price_paise")
+  weekendPricePaise       BigInt?       @map("weekend_price_paise")
+  cleaningFeePaise        BigInt        @default(0) @map("cleaning_fee_paise")
+  minNights               Int           @default(1) @map("min_nights")
+  maxNights               Int           @default(30) @map("max_nights")
+  advanceNoticeHours      Int           @default(24) @map("advance_notice_hours")
+  maxAdvanceDays          Int           @default(365) @map("max_advance_days")
+  bookingMode             BookingMode   @default(INSTANT) @map("booking_mode")
+  cancellationPolicyKey   String?       @map("cancellation_policy_key")
+  turnoverCleaningEnabled Boolean       @default(false) @map("turnover_cleaning_enabled")
+  publicAreaLabel         String        @default("") @map("public_area_label")
+  approxLatitude          Float?        @map("approx_latitude")
+  approxLongitude         Float?        @map("approx_longitude")
+  /// Door/access instructions for guests; disclosed only per SPEC §7 rule 18.
+  checkinInstructions     String?       @map("checkin_instructions")
+  searchVector            Unsupported("tsvector")? @map("search_vector")
+  ratingAvg               Float?        @map("rating_avg")
+  ratingCount             Int           @default(0) @map("rating_count")
+  publishedAt             DateTime?     @map("published_at") @db.Timestamptz(3)
+  submittedAt             DateTime?     @map("submitted_at") @db.Timestamptz(3)
+  pausedBy                Role?         @map("paused_by")
+  editedSinceReview       Boolean       @default(false) @map("edited_since_review")
+  reviewedBy              String?       @map("reviewed_by") @db.Uuid
+  reviewedAt              DateTime?     @map("reviewed_at") @db.Timestamptz(3)
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  property   Property           @relation(fields: [propertyId], references: [id])
+  amenities  ListingAmenity[]
+  photos     ListingPhoto[]
+  priceRules ListingPriceRule[]
+  occupancy  ListingOccupancy[]
+  bookings   Booking[]
+  reviews    Review[]
+
+  @@index([status])
+  @@index([ownerUserId])
+  @@map("listings")
+}
+
+model ListingAmenity {
+  listingId String  @map("listing_id") @db.Uuid
+  amenityId String  @map("amenity_id") @db.Uuid
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  amenity   Amenity @relation(fields: [amenityId], references: [id])
+
+  @@id([listingId, amenityId])
+  @@map("listing_amenities")
+}
+
+model ListingPhoto {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  listingId      String     @map("listing_id") @db.Uuid
+  attachmentId   String     @map("attachment_id") @db.Uuid
+  position       Int
+  caption        String?
+  isCover        Boolean    @default(false) @map("is_cover")
+  publicVariants Json?      @map("public_variants")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  listing        Listing    @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  attachment     Attachment @relation(fields: [attachmentId], references: [id])
+
+  @@index([listingId])
+  @@map("listing_photos")
+}
+
+model ListingPriceRule {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  listingId         String   @map("listing_id") @db.Uuid
+  startDate         DateTime @map("start_date") @db.Date
+  /// Inclusive.
+  endDate           DateTime @map("end_date") @db.Date
+  nightlyPricePaise BigInt   @map("nightly_price_paise")
+  reason            String?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  listing           Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_price_rules")
+}
+
+/// Nights [start_date, end_date) — an exclusion constraint makes overlaps impossible.
+model ListingOccupancy {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  listingId   String        @map("listing_id") @db.Uuid
+  startDate   DateTime      @map("start_date") @db.Date
+  endDate     DateTime      @map("end_date") @db.Date
+  kind        OccupancyKind
+  bookingId   String?       @map("booking_id") @db.Uuid
+  workOrderId String?       @map("work_order_id") @db.Uuid
+  /// Exact window for maintenance blocks (used for check-out-day overlap checks).
+  startsAt    DateTime?     @map("starts_at") @db.Timestamptz(3)
+  endsAt      DateTime?     @map("ends_at") @db.Timestamptz(3)
+  expiresAt   DateTime?     @map("expires_at") @db.Timestamptz(3)
+  note        String?
+  createdBy   String?       @map("created_by") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  listing     Listing       @relation(fields: [listingId], references: [id])
+
+  @@index([listingId, startDate])
+  @@index([bookingId])
+  @@index([workOrderId])
+  @@map("listing_occupancy")
+}
+
+model Booking {
+  id                          String        @id @default(uuid(7)) @db.Uuid
+  reference                   String        @unique
+  listingId                   String        @map("listing_id") @db.Uuid
+  customerUserId              String        @map("customer_user_id") @db.Uuid
+  ownerUserId                 String        @map("owner_user_id") @db.Uuid
+  status                      BookingStatus
+  checkInDate                 DateTime      @map("check_in_date") @db.Date
+  checkOutDate                DateTime      @map("check_out_date") @db.Date
+  checkInAt                   DateTime      @map("check_in_at") @db.Timestamptz(3)
+  checkOutAt                  DateTime      @map("check_out_at") @db.Timestamptz(3)
+  nights                      Int
+  guestsCount                 Int           @map("guests_count")
+  specialRequests             String?       @map("special_requests")
+  guestDetails                Json?         @map("guest_details")
+  bookingModeSnapshot         BookingMode   @map("booking_mode_snapshot")
+  cancellationPolicySnapshot  Json          @map("cancellation_policy_snapshot")
+  pricingSnapshot             Json          @map("pricing_snapshot")
+  nightsTotalPaise            BigInt        @map("nights_total_paise")
+  cleaningFeePaise            BigInt        @map("cleaning_fee_paise")
+  taxPaise                    BigInt        @map("tax_paise")
+  totalPaise                  BigInt        @map("total_paise")
+  commissionBpsApplied        Int           @map("commission_bps_applied")
+  commissionBenchmarkSnapshot Json          @map("commission_benchmark_snapshot")
+  commissionPaise             BigInt        @map("commission_paise")
+  ownerPayoutPaise            BigInt        @map("owner_payout_paise")
+  holdExpiresAt               DateTime?     @map("hold_expires_at") @db.Timestamptz(3)
+  requestExpiresAt            DateTime?     @map("request_expires_at") @db.Timestamptz(3)
+  requestedAt                 DateTime      @default(now()) @map("requested_at") @db.Timestamptz(3)
+  confirmedAt                 DateTime?     @map("confirmed_at") @db.Timestamptz(3)
+  cancelledAt                 DateTime?     @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByRole             String?       @map("cancelled_by_role")
+  cancelReason                String?       @map("cancel_reason")
+  refundPaise                 BigInt        @default(0) @map("refund_paise")
+  completedAt                 DateTime?     @map("completed_at") @db.Timestamptz(3)
+  createdAt                   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  listing  Listing   @relation(fields: [listingId], references: [id])
+  payments Payment[]
+  payout   Payout?
+  review   Review?
+
+  @@index([customerUserId])
+  @@index([ownerUserId])
+  @@index([listingId])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Payout {
+  id                     String       @id @default(uuid(7)) @db.Uuid
+  reference              String       @unique
+  bookingId              String       @unique @map("booking_id") @db.Uuid
+  ownerUserId            String       @map("owner_user_id") @db.Uuid
+  amountPaise            BigInt       @map("amount_paise")
+  status                 PayoutStatus
+  eligibleAt             DateTime     @map("eligible_at") @db.Timestamptz(3)
+  paidAt                 DateTime?    @map("paid_at") @db.Timestamptz(3)
+  paymentReference       String?      @map("payment_reference")
+  holdReason             String?      @map("hold_reason")
+  heldBySystem           Boolean      @default(false) @map("held_by_system")
+  requiresDualApproval   Boolean      @default(false) @map("requires_dual_approval")
+  approvedBy             String?      @map("approved_by") @db.Uuid
+  approvedAt             DateTime?    @map("approved_at") @db.Timestamptz(3)
+  recordedBy             String?      @map("recorded_by") @db.Uuid
+  adjustmentPaise        BigInt       @default(0) @map("adjustment_paise")
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  booking                Booking      @relation(fields: [bookingId], references: [id])
+
+  @@index([ownerUserId])
+  @@index([status])
+  @@map("payouts")
+}
+
+model Review {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  bookingId      String       @unique @map("booking_id") @db.Uuid
+  listingId      String       @map("listing_id") @db.Uuid
+  customerUserId String       @map("customer_user_id") @db.Uuid
+  rating         Int
+  body           String
+  status         ReviewStatus @default(PUBLISHED)
+  hiddenReason   String?      @map("hidden_reason")
+  moderatedBy    String?      @map("moderated_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  booking        Booking      @relation(fields: [bookingId], references: [id])
+  listing        Listing      @relation(fields: [listingId], references: [id])
+
+  @@index([listingId])
+  @@map("reviews")
+}
+
+model CommissionBenchmark {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  platformName   String   @map("platform_name")
+  commissionBps  Int      @map("commission_bps")
+  note           String?
+  sourceUrl      String?  @map("source_url")
+  asOfDate       DateTime @map("as_of_date") @db.Date
+  enabled        Boolean  @default(true)
+  enteredBy      String?  @map("entered_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("commission_benchmarks")
+}
+
+/// Effective-rate history: one row whenever benchmarks or commission settings change.
+model CommissionRateHistory {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  benchmarkBps  Int?     @map("benchmark_bps")
+  effectiveBps  Int      @map("effective_bps")
+  inputs        Json
+  changedBy     String?  @map("changed_by") @db.Uuid
+  reason        String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("commission_rate_history")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Maintenance
+// ------------------------------------------------------------------------------------------------
+model ServiceRequest {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  reference         String        @unique
+  ownerUserId       String        @map("owner_user_id") @db.Uuid
+  propertyId        String        @map("property_id") @db.Uuid
+  categoryId        String        @map("category_id") @db.Uuid
+  title             String
+  description       String
+  intakeAnswers     Json          @default("{}") @map("intake_answers")
+  urgency           Urgency       @default(STANDARD)
+  safetyFlag        Boolean       @default(false) @map("safety_flag")
+  safetyGuidanceKeys String[]     @default([]) @map("safety_guidance_keys")
+  status            RequestStatus
+  preferredWindows  Json          @default("[]") @map("preferred_windows")
+  accessContactId   String?       @map("access_contact_id") @db.Uuid
+  handledByAdminId  String?       @map("handled_by_admin_id") @db.Uuid
+  createdOnBehalfBy String?       @map("created_on_behalf_by") @db.Uuid
+  source            RequestSource @default(OWNER)
+  overrideReason    String?       @map("override_reason")
+  bookingId         String?       @map("booking_id") @db.Uuid
+  submittedAt       DateTime      @default(now()) @map("submitted_at") @db.Timestamptz(3)
+  firstResponseAt   DateTime?     @map("first_response_at") @db.Timestamptz(3)
+  closedAt          DateTime?     @map("closed_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  property     Property             @relation(fields: [propertyId], references: [id])
+  inspections  Inspection[]
+  quotes       Quote[]
+  workOrders   WorkOrder[]
+  requirements PaymentRequirement[]
+
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([propertyId])
+  @@map("service_requests")
+}
+
+model Inspection {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  requestId      String           @map("request_id") @db.Uuid
+  scheduledStart DateTime         @map("scheduled_start") @db.Timestamptz(3)
+  scheduledEnd   DateTime         @map("scheduled_end") @db.Timestamptz(3)
+  providerId     String?          @map("provider_id") @db.Uuid
+  status         InspectionStatus @default(SCHEDULED)
+  feePaise       BigInt           @default(0) @map("fee_paise")
+  findings       String?
+  createdBy      String?          @map("created_by") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  request        ServiceRequest   @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])
+  @@map("inspections")
+}
+
+model Quote {
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  reference          String        @unique
+  requestId          String        @map("request_id") @db.Uuid
+  quoteType          QuoteType     @default(ORIGINAL) @map("quote_type")
+  workOrderId        String?       @map("work_order_id") @db.Uuid
+  baseQuoteId        String?       @map("base_quote_id") @db.Uuid
+  version            Int
+  status             QuoteStatus   @default(DRAFT)
+  currency           String        @default("INR")
+  subtotalPaise      BigInt        @default(0) @map("subtotal_paise")
+  taxPaise           BigInt        @default(0) @map("tax_paise")
+  totalPaise         BigInt        @default(0) @map("total_paise")
+  scope              String?
+  exclusions         Json          @default("[]")
+  assumptions        Json          @default("[]")
+  estimatedDuration  String?       @map("estimated_duration")
+  validUntil         DateTime      @map("valid_until") @db.Timestamptz(3)
+  sentAt             DateTime?     @map("sent_at") @db.Timestamptz(3)
+  sentBy             String?       @map("sent_by") @db.Uuid
+  approvedBy         String?       @map("approved_by") @db.Uuid
+  approvedAt         DateTime?     @map("approved_at") @db.Timestamptz(3)
+  approvedTotalPaise BigInt?       @map("approved_total_paise")
+  createdBy          String?       @map("created_by") @db.Uuid
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  request   ServiceRequest  @relation(fields: [requestId], references: [id])
+  lineItems QuoteLineItem[]
+  decisions QuoteDecision[]
+
+  @@unique([requestId, quoteType, version])
+  @@index([workOrderId])
+  @@map("quotes")
+}
+
+model QuoteLineItem {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  quoteId           String        @map("quote_id") @db.Uuid
+  position          Int
+  description       String
+  quantity          Decimal       @db.Decimal(12, 3)
+  unit              String
+  unitPricePaise    BigInt        @map("unit_price_paise")
+  taxRateBps        Int           @default(0) @map("tax_rate_bps")
+  lineTotalPaise    BigInt        @map("line_total_paise")
+  lineTaxPaise      BigInt        @map("line_tax_paise")
+  lineType          LineType      @map("line_type")
+  direction         LineDirection
+  internalCostPaise BigInt?       @map("internal_cost_paise")
+  quote             Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+  @@map("quote_line_items")
+}
+
+/// Approval/rejection record bound to an exact version and displayed total (SPEC §7 rule 4).
+model QuoteDecision {
+  id                  String   @id @default(uuid(7)) @db.Uuid
+  quoteId             String   @map("quote_id") @db.Uuid
+  userId              String   @map("user_id") @db.Uuid
+  version             Int
+  decision            String
+  displayedTotalPaise BigInt?  @map("displayed_total_paise")
+  reason              String?
+  requestRevision     Boolean  @default(false) @map("request_revision")
+  idempotencyKey      String?  @map("idempotency_key")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  quote               Quote    @relation(fields: [quoteId], references: [id])
+
+  @@index([quoteId])
+  @@map("quote_decisions")
+}
+
+model ServiceProvider {
+  id                 String                     @id @default(uuid(7)) @db.Uuid
+  name               String
+  providerType       ProviderType               @map("provider_type")
+  contactName        String?                    @map("contact_name")
+  phone              String
+  status             ProviderStatus             @default(ACTIVE)
+  verificationStatus ProviderVerificationStatus @default(PENDING) @map("verification_status")
+  availabilityNotes  String?                    @map("availability_notes")
+  internalNotes      String?                    @map("internal_notes")
+  internalRating     Int?                       @map("internal_rating")
+  createdBy          String?                    @map("created_by") @db.Uuid
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  skills      ProviderSkill[]
+  areas       ProviderServiceArea[]
+  assignments WorkAssignment[]
+
+  @@map("service_providers")
+}
+
+model ProviderSkill {
+  providerId String          @map("provider_id") @db.Uuid
+  categoryId String          @map("category_id") @db.Uuid
+  provider   ServiceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  category   ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  @@id([providerId, categoryId])
+  @@map("provider_skills")
+}
+
+model ProviderServiceArea {
+  providerId    String          @map("provider_id") @db.Uuid
+  serviceAreaId String          @map("service_area_id") @db.Uuid
+  provider      ServiceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  serviceArea   ServiceArea     @relation(fields: [serviceAreaId], references: [id])
+
+  @@id([providerId, serviceAreaId])
+  @@map("provider_service_areas")
+}
+
+model WorkOrder {
+  id                    String          @id @default(uuid(7)) @db.Uuid
+  reference             String          @unique
+  kind                  WorkOrderKind   @default(STANDARD)
+  requestId             String          @map("request_id") @db.Uuid
+  propertyId            String          @map("property_id") @db.Uuid
+  ownerUserId           String          @map("owner_user_id") @db.Uuid
+  quoteId               String?         @unique @map("quote_id") @db.Uuid
+  parentWorkOrderId     String?         @map("parent_work_order_id") @db.Uuid
+  issueId               String?         @map("issue_id") @db.Uuid
+  status                WorkOrderStatus @default(DRAFT)
+  scheduledStart        DateTime?       @map("scheduled_start") @db.Timestamptz(3)
+  scheduledEnd          DateTime?       @map("scheduled_end") @db.Timestamptz(3)
+  startedAt             DateTime?       @map("started_at") @db.Timestamptz(3)
+  submittedAt           DateTime?       @map("submitted_at") @db.Timestamptz(3)
+  submittedBy           String?         @map("submitted_by") @db.Uuid
+  completedAt           DateTime?       @map("completed_at") @db.Timestamptz(3)
+  ownerReviewDueAt      DateTime?       @map("owner_review_due_at") @db.Timestamptz(3)
+  approvedTotalPaise    BigInt          @default(0) @map("approved_total_paise")
+  blockedReason         BlockedReason?  @map("blocked_reason")
+  checklistTemplateId   String?         @map("checklist_template_id") @db.Uuid
+  checklistVersion      Int?            @map("checklist_version")
+  completionOverride    String?         @map("completion_override")
+  createdBy             String?         @map("created_by") @db.Uuid
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  request     ServiceRequest        @relation(fields: [requestId], references: [id])
+  assignments WorkAssignment[]
+  visits      WorkVisit[]
+  checklist   WorkChecklistResult[]
+
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([requestId])
+  @@map("work_orders")
+}
+
+model WorkAssignment {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  workOrderId    String           @map("work_order_id") @db.Uuid
+  providerId     String           @map("provider_id") @db.Uuid
+  assignmentRole AssignmentRole   @default(PRIMARY) @map("assignment_role")
+  assignedBy     String           @map("assigned_by") @db.Uuid
+  assignedAt     DateTime         @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  status         AssignmentStatus @default(ACTIVE)
+  overrideReason String?          @map("override_reason")
+  internalNotes  String?          @map("internal_notes")
+  workOrder      WorkOrder        @relation(fields: [workOrderId], references: [id])
+  provider       ServiceProvider  @relation(fields: [providerId], references: [id])
+
+  @@index([workOrderId])
+  @@index([providerId])
+  @@map("work_assignments")
+}
+
+model WorkVisit {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  workOrderId  String    @map("work_order_id") @db.Uuid
+  providerId   String    @map("provider_id") @db.Uuid
+  recordedBy   String    @map("recorded_by") @db.Uuid
+  source       String
+  checkedInAt  DateTime  @map("checked_in_at") @db.Timestamptz(3)
+  checkedOutAt DateTime? @map("checked_out_at") @db.Timestamptz(3)
+  note         String?
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  workOrder    WorkOrder @relation(fields: [workOrderId], references: [id])
+
+  @@index([workOrderId])
+  @@map("work_visits")
+}
+
+model WorkChecklistResult {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  workOrderId     String    @map("work_order_id") @db.Uuid
+  templateVersion Int       @map("template_version")
+  itemKey         String    @map("item_key")
+  result          Json
+  notes           String?
+  recordedBy      String    @map("recorded_by") @db.Uuid
+  providerId      String?   @map("provider_id") @db.Uuid
+  completedAt     DateTime  @default(now()) @map("completed_at") @db.Timestamptz(3)
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id])
+
+  @@index([workOrderId])
+  @@map("work_checklist_results")
+}
+
+model PaymentRequirement {
+  id          String            @id @default(uuid(7)) @db.Uuid
+  requestId   String            @map("request_id") @db.Uuid
+  workOrderId String?           @map("work_order_id") @db.Uuid
+  purpose     PaymentPurpose
+  amountPaise BigInt            @map("amount_paise")
+  dueTrigger  DueTrigger        @map("due_trigger")
+  status      RequirementStatus @default(PENDING)
+  isDue       Boolean           @default(false) @map("is_due")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+  request     ServiceRequest    @relation(fields: [requestId], references: [id])
+  payments    Payment[]
+
+  @@index([requestId])
+  @@index([workOrderId])
+  @@map("payment_requirements")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Messages, attachments, issues
+// ------------------------------------------------------------------------------------------------
+model Message {
+  id           String            @id @default(uuid(7)) @db.Uuid
+  threadType   ThreadType        @map("thread_type")
+  threadId     String            @map("thread_id") @db.Uuid
+  authorUserId String?           @map("author_user_id") @db.Uuid
+  authorRole   String?           @map("author_role")
+  body         String
+  visibility   MessageVisibility @default(PARTICIPANT)
+  masked       Boolean           @default(false)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([threadType, threadId, createdAt])
+  @@map("messages")
+}
+
+model Attachment {
+  id                    String               @id @default(uuid(7)) @db.Uuid
+  ownerType             AttachmentOwnerType  @map("owner_type")
+  ownerId               String?              @map("owner_id") @db.Uuid
+  evidencePhase         EvidencePhase        @default(GENERAL) @map("evidence_phase")
+  objectKey             String               @unique @map("object_key")
+  originalFilename      String               @map("original_filename")
+  mimeType              String               @map("mime_type")
+  sizeBytes             Int                  @map("size_bytes")
+  sha256                String?
+  status                AttachmentStatus     @default(PENDING)
+  uploadedBy            String               @map("uploaded_by") @db.Uuid
+  source                AttachmentSource     @default(USER_UPLOAD)
+  recordedForProviderId String?              @map("recorded_for_provider_id") @db.Uuid
+  visibility            AttachmentVisibility @default(PARTICIPANT)
+  capturedAt            DateTime?            @map("captured_at") @db.Timestamptz(3)
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  listingPhotos         ListingPhoto[]
+
+  @@index([ownerType, ownerId])
+  @@index([uploadedBy])
+  @@map("attachments")
+}
+
+model Issue {
+  id               String           @id @default(uuid(7)) @db.Uuid
+  reference        String           @unique
+  subjectType      IssueSubjectType @map("subject_type")
+  subjectId        String           @map("subject_id") @db.Uuid
+  ownerUserId      String           @map("owner_user_id") @db.Uuid
+  customerUserId   String?          @map("customer_user_id") @db.Uuid
+  raisedByUserId   String           @map("raised_by_user_id") @db.Uuid
+  raisedByRole     Role             @map("raised_by_role")
+  category         String
+  description      String
+  status           IssueStatus      @default(OPEN)
+  handledByAdminId String?          @map("handled_by_admin_id") @db.Uuid
+  resolutionCode   ResolutionCode?  @map("resolution_code")
+  internalNote     String?          @map("internal_note")
+  visibleSummary   String?          @map("visible_summary")
+  resolvedAt       DateTime?        @map("resolved_at") @db.Timestamptz(3)
+  closedAt         DateTime?        @map("closed_at") @db.Timestamptz(3)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([subjectType, subjectId])
+  @@index([ownerUserId])
+  @@index([customerUserId])
+  @@index([status])
+  @@map("issues")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Money
+// ------------------------------------------------------------------------------------------------
+model Payment {
+  id                String              @id @default(uuid(7)) @db.Uuid
+  requirementId     String?             @map("requirement_id") @db.Uuid
+  bookingId         String?             @map("booking_id") @db.Uuid
+  payerUserId       String              @map("payer_user_id") @db.Uuid
+  provider          String
+  providerPaymentId String              @map("provider_payment_id")
+  amountPaise       BigInt              @map("amount_paise")
+  refundedPaise     BigInt              @default(0) @map("refunded_paise")
+  currency          String              @default("INR")
+  status            PaymentStatus       @default(PENDING)
+  checkoutUrl       String?             @map("checkout_url")
+  failureReason     String?             @map("failure_reason")
+  paidAt            DateTime?           @map("paid_at") @db.Timestamptz(3)
+  idempotencyKey    String?             @map("idempotency_key")
+  recordedBy        String?             @map("recorded_by") @db.Uuid
+  offlineReason     String?             @map("offline_reason")
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  requirement       PaymentRequirement? @relation(fields: [requirementId], references: [id])
+  booking           Booking?            @relation(fields: [bookingId], references: [id])
+  refunds           Refund[]
+
+  @@unique([provider, providerPaymentId])
+  @@index([bookingId])
+  @@index([requirementId])
+  @@index([payerUserId])
+  @@map("payments")
+}
+
+model PaymentEvent {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  provider          String
+  providerEventId   String    @map("provider_event_id")
+  eventType         String    @map("event_type")
+  providerPaymentId String?   @map("provider_payment_id")
+  payloadHash       String    @map("payload_hash")
+  receivedAt        DateTime  @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt       DateTime? @map("processed_at") @db.Timestamptz(3)
+  processingNote    String?   @map("processing_note")
+
+  @@unique([provider, providerEventId])
+  @@map("payment_events")
+}
+
+model Refund {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  paymentId        String       @map("payment_id") @db.Uuid
+  amountPaise      BigInt       @map("amount_paise")
+  reason           String
+  status           RefundStatus @default(PENDING)
+  providerRefundId String?      @map("provider_refund_id")
+  idempotencyKey   String       @unique @map("idempotency_key")
+  attempts         Int          @default(0)
+  lastError        String?      @map("last_error")
+  approvedBy       String?      @map("approved_by") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  payment          Payment      @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+model Invoice {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  reference     String      @unique
+  kind          InvoiceKind
+  requestId     String?     @map("request_id") @db.Uuid
+  workOrderId   String?     @map("work_order_id") @db.Uuid
+  bookingId     String?     @map("booking_id") @db.Uuid
+  paymentId     String?     @map("payment_id") @db.Uuid
+  ownerUserId   String?     @map("owner_user_id") @db.Uuid
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  invoiceNumber String      @map("invoice_number")
+  amountPaise   BigInt      @map("amount_paise")
+  taxMetadata   Json        @default("{}") @map("tax_metadata")
+  lines         Json        @default("[]")
+  issuedAt      DateTime    @default(now()) @map("issued_at") @db.Timestamptz(3)
+  status        String      @default("ISSUED")
+  documentKey   String?     @map("document_key")
+
+  @@index([recipientUserId])
+  @@map("invoices")
+}
+
+// ------------------------------------------------------------------------------------------------
+// Notifications, outbox, audit, alerts
+// ------------------------------------------------------------------------------------------------
+model Notification {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  userId        String              @map("user_id") @db.Uuid
+  channel       NotificationChannel
+  templateKey   String              @map("template_key")
+  params        Json                @default("{}")
+  status        NotificationStatus  @default(PENDING)
+  providerRef   String?             @map("provider_ref")
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime?           @map("next_attempt_at") @db.Timestamptz(3)
+  sentAt        DateTime?           @map("sent_at") @db.Timestamptz(3)
+  readAt        DateTime?           @map("read_at") @db.Timestamptz(3)
+  failureReason String?             @map("failure_reason")
+  outboxEventId String?             @map("outbox_event_id") @db.Uuid
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  user          User                @relation(fields: [userId], references: [id])
+
+  @@unique([outboxEventId, userId, channel, templateKey])
+  @@index([userId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@map("notifications")
+}
+
+model OutboxEvent {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  type          String
+  payload       Json
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error")
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  dispatchedAt  DateTime? @map("dispatched_at") @db.Timestamptz(3)
+  failedAt      DateTime? @map("failed_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([dispatchedAt, nextAttemptAt])
+  @@map("outbox_events")
+}
+
+model StatusEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id") @db.Uuid
+  fromStatus String?  @map("from_status")
+  toStatus   String   @map("to_status")
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorRole  String   @map("actor_role")
+  reason     String?
+  ownerVisible Boolean @default(true) @map("owner_visible")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([entityType, entityId, createdAt])
+  @@map("status_events")
+}
+
+model AuditEvent {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  actorId        String?  @map("actor_id") @db.Uuid
+  actorRole      String   @map("actor_role")
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String?  @map("entity_id")
+  onBehalfOfType String?  @map("on_behalf_of_type")
+  onBehalfOfId   String?  @map("on_behalf_of_id")
+  metadata       Json     @default("{}")
+  ipHash         String?  @map("ip_hash")
+  requestId      String?  @map("request_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_events")
+}
+
+model AdminAlert {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  type       String
+  entityType String    @map("entity_type")
+  entityId   String?   @map("entity_id")
+  metadata   Json      @default("{}")
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(3)
+  resolvedBy String?   @map("resolved_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([resolvedAt])
+  @@map("admin_alerts")
+}
+
+// ------------------------------------------------------------------------------------------------
+// AI
+// ------------------------------------------------------------------------------------------------
+model AiSuggestion {
+  id            String             @id @default(uuid(7)) @db.Uuid
+  featureKey    String             @map("feature_key")
+  subjectType   String?            @map("subject_type")
+  subjectId     String?            @map("subject_id") @db.Uuid
+  audienceRole  Role               @map("audience_role")
+  requestedBy   String?            @map("requested_by") @db.Uuid
+  status        AiSuggestionStatus @default(PENDING)
+  model         String?
+  promptVersion String?            @map("prompt_version")
+  inputHash     String             @map("input_hash")
+  output        Json?
+  errorCode     String?            @map("error_code")
+  latencyMs     Int?               @map("latency_ms")
+  inputTokens   Int?               @map("input_tokens")
+  outputTokens  Int?               @map("output_tokens")
+  actedBy       String?            @map("acted_by") @db.Uuid
+  actedAt       DateTime?          @map("acted_at") @db.Timestamptz(3)
+  feedback      String?
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([subjectType, subjectId])
+  @@index([featureKey, inputHash])
+  @@map("ai_suggestions")
+}
+
+model AiUsage {
+  usageDate    DateTime @map("usage_date") @db.Date
+  userId       String   @map("user_id") @db.Uuid
+  featureKey   String   @map("feature_key")
+  calls        Int      @default(0)
+  inputTokens  Int      @default(0) @map("input_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+
+  @@id([usageDate, userId, featureKey])
+  @@map("ai_usage")
+}

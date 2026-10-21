@@ -1,0 +1,33 @@
+{
+  "name": "@propcare/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@propcare/shared": "workspace:*",
+    "next": "15.5.27",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "swr": "2.5.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/postcss": "4.1.18",
+    "@types/node": "22.20.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.3",
+    "dotenv": "17.4.2",
+    "postcss": "8.5.29",
+    "tailwindcss": "4.1.18",
+    "vitest": "3.2.7"
+  }
+}

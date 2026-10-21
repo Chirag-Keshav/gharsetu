@@ -1,0 +1,39 @@
+{
+  "name": "property-care",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.5.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "env:init": "node scripts/init-env.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --filter @propcare/shared build && pnpm --filter @propcare/api build && pnpm --filter @propcare/web build",
+    "lint": "pnpm -r --workspace-concurrency=1 lint && node scripts/check-brand.mjs",
+    "typecheck": "pnpm --filter @propcare/shared build && pnpm -r typecheck",
+    "test": "pnpm --filter @propcare/shared build && pnpm -r --workspace-concurrency=1 test",
+    "test:e2e": "pnpm --filter @propcare/web test:e2e",
+    "format": "prettier --write .",
+    "db:start": "node scripts/local-db.mjs start",
+    "db:stop": "node scripts/local-db.mjs stop",
+    "db:status": "node scripts/local-db.mjs status",
+    "db:migrate": "pnpm --filter @propcare/api db:migrate",
+    "db:seed": "pnpm --filter @propcare/shared build && pnpm --filter @propcare/api db:seed",
+    "db:reset": "pnpm --filter @propcare/api db:reset",
+    "seed:admin": "pnpm --filter @propcare/api seed:admin",
+    "ai:eval": "pnpm --filter @propcare/api ai:eval"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@next/eslint-plugin-next": "15.5.27",
+    "embedded-postgres": "16.14.0-beta.17",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "pg": "8.23.1",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1"
+  }
+}

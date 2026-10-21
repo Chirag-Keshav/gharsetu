@@ -1,0 +1,117 @@
+@import 'tailwindcss';
+
+/* Design tokens: light by default, dark via prefers-color-scheme. */
+:root {
+  --canvas: #f7f7f4;
+  --surface: #ffffff;
+  --surface-2: #f1f2ee;
+  --ink: #17201c;
+  --muted: #5d6762;
+  --line: #e1e3dd;
+  --brand: #0f6b5c;
+  --brand-ink: #ffffff;
+  --brand-soft: #e3f1ed;
+  --accent: #c2622d;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --warn: #8a5a00;
+  --warn-soft: #fff4dc;
+  --ok: #17703a;
+  --ok-soft: #e5f4ea;
+  --info: #1d4f91;
+  --info-soft: #e7eefa;
+  --ai: #5b3cc4;
+  --ai-soft: #efeafd;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0f1412;
+    --surface: #161d1a;
+    --surface-2: #1d2622;
+    --ink: #e8ece9;
+    --muted: #9aa59f;
+    --line: #2a3530;
+    --brand: #3fb59c;
+    --brand-ink: #06231d;
+    --brand-soft: #173a32;
+    --accent: #e58a55;
+    --danger: #f2877e;
+    --danger-soft: #3a1c1a;
+    --warn: #f0c25b;
+    --warn-soft: #3a2f14;
+    --ok: #6fd291;
+    --ok-soft: #173322;
+    --info: #8fb4f0;
+    --info-soft: #182840;
+    --ai: #b7a5ff;
+    --ai-soft: #251e42;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-ai: var(--ai);
+  --color-ai-soft: var(--ai-soft);
+  --font-sans: ui-sans-serif, system-ui, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+}
+
+html {
+  background: var(--canvas);
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Field validation feedback only after interaction (:user-invalid), never colour-only. */
+.field-error {
+  display: none;
+}
+.field :is(input, select, textarea):user-invalid {
+  border-color: var(--danger);
+  background-color: var(--danger-soft);
+}
+.field :is(input, select, textarea):user-invalid ~ .field-error,
+.field .field-error[data-server] {
+  display: flex;
+}
+
+dialog {
+  margin: auto;
+}
+dialog::backdrop {
+  background: rgb(10 14 12 / 0.55);
+}
+
+.prose-text p + p {
+  margin-top: 0.75rem;
+}
